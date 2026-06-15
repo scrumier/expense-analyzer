@@ -1,4 +1,4 @@
-# samse-expense
+# expense-analyzer
 
 Agent d'analyse de dépenses d'entreprise. Détecte automatiquement les anomalies financières et génère un rapport HTML avec explication IA.
 
