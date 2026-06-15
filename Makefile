@@ -3,7 +3,8 @@
 #   make run     <- démarre la visualisation  ->  http://127.0.0.1:5051
 # Bind Tailscale uniquement, jamais exposé publiquement.
 
-TS   := 127.0.0.1
+-include local.mk
+TS ?= 127.0.0.1
 PORT := 5051
 
 .PHONY: help setup run

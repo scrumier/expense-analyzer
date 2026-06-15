@@ -5,3 +5,4 @@ __pycache__/
 output/
 uv.lock
 *.egg-info/
+local.mk
