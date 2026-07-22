@@ -1,3 +1,5 @@
+"""Generate a demo expense CSV with a few anomalies planted in it."""
+
 import csv
 import random
 from datetime import date, timedelta
@@ -5,9 +7,14 @@ from datetime import date, timedelta
 random.seed(42)
 
 EMPLOYEES = [
-    "Martin, Sophie", "Dubois, Julien", "Leroy, Camille",
-    "Moreau, Thomas", "Petit, Anaïs", "Bernard, Marc",
-    "Laurent, Claire", "Simon, Antoine",
+    "Martin, Sophie",
+    "Dubois, Julien",
+    "Leroy, Camille",
+    "Moreau, Thomas",
+    "Petit, Anaïs",
+    "Bernard, Marc",
+    "Laurent, Claire",
+    "Simon, Antoine",
 ]
 
 COST_CENTERS = ["DAF", "Commercial", "RH", "IT", "Direction", "Marketing"]
@@ -137,23 +144,25 @@ DESCRIPTIONS = {
         "Formation RGPD équipe {dept}",
     ],
     "Fournitures IT": [
-        "MacBook Pro 14\" - {name}",
+        'MacBook Pro 14" - {name}',
         "PC portable Dell XPS - {name}",
-        "Écran 27\" + dock USB-C",
+        'Écran 27" + dock USB-C',
         "Serveur NAS - IT {n}",
         "Switch réseau 24 ports",
     ],
 }
 
 
-def pick_description(cat, **kwargs):
+def pick_description(cat: str, **kwargs: object) -> str:
     templates = DESCRIPTIONS.get(cat, ["Achat {cat}"])
     tpl = random.choice(templates)
     return tpl.format(
         cat=cat.lower(),
         n=random.randint(2, 20),
         q=random.randint(1, 4),
-        c=random.choice(["Renault", "TotalEnergies", "Société Générale", "BNP Paribas", "Airbus"]),
+        c=random.choice(
+            ["Renault", "TotalEnergies", "Société Générale", "BNP Paribas", "Airbus"]
+        ),
         dept=random.choice(["Commercial", "RH", "IT", "Direction", "Marketing"]),
         name=random.choice([e.split(",")[0] for e in EMPLOYEES]),
     )
@@ -162,7 +171,7 @@ def pick_description(cat, **kwargs):
 rows = []
 start = date(2025, 1, 1)
 
-for i in range(350):
+for _ in range(350):
     d = start + timedelta(days=random.randint(0, 364))
     while d.weekday() >= 5:
         d += timedelta(days=1)
@@ -173,115 +182,142 @@ for i in range(350):
     employee = random.choice(EMPLOYEES)
     cost_center = random.choice(COST_CENTERS)
 
-    rows.append({
-        "date": d.isoformat(),
-        "montant": amount,
-        "fournisseur": supplier,
-        "categorie": cat,
-        "description": pick_description(cat),
-        "employe": employee,
-        "centre_cout": cost_center,
-        "statut": random.choices(["validé", "en attente"], weights=[85, 15])[0],
-    })
+    rows.append(
+        {
+            "date": d.isoformat(),
+            "montant": amount,
+            "fournisseur": supplier,
+            "categorie": cat,
+            "description": pick_description(cat),
+            "employe": employee,
+            "centre_cout": cost_center,
+            "statut": random.choices(["validé", "en attente"], weights=[85, 15])[0],
+        }
+    )
 
 # --- ANOMALIES RÉALISTES ---
 
 # 1. Prestation conseil externe — montant anormalement élevé, fournisseur inconnu
-rows.append({
-    "date": "2025-06-15",
-    "montant": 48500.00,
-    "fournisseur": "Delta Consult SARL",
-    "categorie": "Logiciels & SaaS",
-    "description": "Prestation conseil transformation digitale - phase 1",
-    "employe": "Bernard, Marc",
-    "centre_cout": "Direction",
-    "statut": "validé",
-})
+rows.append(
+    {
+        "date": "2025-06-15",
+        "montant": 48500.00,
+        "fournisseur": "Delta Consult SARL",
+        "categorie": "Logiciels & SaaS",
+        "description": "Prestation conseil transformation digitale - phase 1",
+        "employe": "Bernard, Marc",
+        "centre_cout": "Direction",
+        "statut": "validé",
+    }
+)
 
 # 2. Doublon exact — même fournisseur, même montant, 3 jours d'écart
-rows.append({
-    "date": "2025-03-10",
-    "montant": 1247.80,
-    "fournisseur": "Dell Technologies",
-    "categorie": "Fournitures IT",
-    "description": "Écran 27\" + dock USB-C",
-    "employe": "Dubois, Julien",
-    "centre_cout": "IT",
-    "statut": "validé",
-})
-rows.append({
-    "date": "2025-03-13",
-    "montant": 1247.80,
-    "fournisseur": "Dell Technologies",
-    "categorie": "Fournitures IT",
-    "description": "Écran 27\" + dock USB-C",
-    "employe": "Dubois, Julien",
-    "centre_cout": "IT",
-    "statut": "validé",
-})
+rows.append(
+    {
+        "date": "2025-03-10",
+        "montant": 1247.80,
+        "fournisseur": "Dell Technologies",
+        "categorie": "Fournitures IT",
+        "description": 'Écran 27" + dock USB-C',
+        "employe": "Dubois, Julien",
+        "centre_cout": "IT",
+        "statut": "validé",
+    }
+)
+rows.append(
+    {
+        "date": "2025-03-13",
+        "montant": 1247.80,
+        "fournisseur": "Dell Technologies",
+        "categorie": "Fournitures IT",
+        "description": 'Écran 27" + dock USB-C',
+        "employe": "Dubois, Julien",
+        "centre_cout": "IT",
+        "statut": "validé",
+    }
+)
 
 # 3. Transaction un dimanche — restaurant + montant élevé
-rows.append({
-    "date": "2025-09-07",  # dimanche
-    "montant": 4800.00,
-    "fournisseur": "Noura - Neuilly",
-    "categorie": "Restauration",
-    "description": "Dîner de gala - direction et partenaires",
-    "employe": "Martin, Sophie",
-    "centre_cout": "Direction",
-    "statut": "validé",
-})
+rows.append(
+    {
+        "date": "2025-09-07",  # dimanche
+        "montant": 4800.00,
+        "fournisseur": "Noura - Neuilly",
+        "categorie": "Restauration",
+        "description": "Dîner de gala - direction et partenaires",
+        "employe": "Martin, Sophie",
+        "centre_cout": "Direction",
+        "statut": "validé",
+    }
+)
 
 # 4. Montant rond suspect — description vague
-rows.append({
-    "date": "2025-11-03",
-    "montant": 15000.00,
-    "fournisseur": "Total Energies",
-    "categorie": "Carburant",
-    "description": "Divers carburant",
-    "employe": "Simon, Antoine",
-    "centre_cout": "Commercial",
-    "statut": "validé",
-})
+rows.append(
+    {
+        "date": "2025-11-03",
+        "montant": 15000.00,
+        "fournisseur": "Total Energies",
+        "categorie": "Carburant",
+        "description": "Divers carburant",
+        "employe": "Simon, Antoine",
+        "centre_cout": "Commercial",
+        "statut": "validé",
+    }
+)
 
 # 5. Pic transport Q4 — même employé, 6 billets avion en 3 semaines
 for i, day in enumerate([3, 7, 10, 14, 17, 21]):
-    rows.append({
-        "date": f"2025-10-{day:02d}",
-        "montant": round(random.uniform(650, 920), 2),
-        "fournisseur": "Air France",
-        "categorie": "Transport",
-        "description": f"Paris-{'New York' if i % 2 == 0 else 'Londres'} - déplacement commercial",
-        "employe": "Moreau, Thomas",
-        "centre_cout": "Commercial",
-        "statut": "validé",
-    })
+    rows.append(
+        {
+            "date": f"2025-10-{day:02d}",
+            "montant": round(random.uniform(650, 920), 2),
+            "fournisseur": "Air France",
+            "categorie": "Transport",
+            "description": f"Paris-{'New York' if i % 2 == 0 else 'Londres'} - déplacement commercial",
+            "employe": "Moreau, Thomas",
+            "centre_cout": "Commercial",
+            "statut": "validé",
+        }
+    )
 
 # 6. Abonnement SaaS dupliqué — deux outils identiques payés
-rows.append({
-    "date": "2025-01-15",
-    "montant": 1890.00,
-    "fournisseur": "Zoom Communications",
-    "categorie": "Logiciels & SaaS",
-    "description": "Abonnement annuel Zoom - 50 licences",
-    "employe": "Leroy, Camille",
-    "centre_cout": "IT",
-    "statut": "validé",
-})
-rows.append({
-    "date": "2025-02-01",
-    "montant": 2100.00,
-    "fournisseur": "Microsoft 365",
-    "categorie": "Logiciels & SaaS",
-    "description": "Abonnement Teams + Visio - 50 licences",
-    "employe": "Leroy, Camille",
-    "centre_cout": "IT",
-    "statut": "validé",
-})
+rows.append(
+    {
+        "date": "2025-01-15",
+        "montant": 1890.00,
+        "fournisseur": "Zoom Communications",
+        "categorie": "Logiciels & SaaS",
+        "description": "Abonnement annuel Zoom - 50 licences",
+        "employe": "Leroy, Camille",
+        "centre_cout": "IT",
+        "statut": "validé",
+    }
+)
+rows.append(
+    {
+        "date": "2025-02-01",
+        "montant": 2100.00,
+        "fournisseur": "Microsoft 365",
+        "categorie": "Logiciels & SaaS",
+        "description": "Abonnement Teams + Visio - 50 licences",
+        "employe": "Leroy, Camille",
+        "centre_cout": "IT",
+        "statut": "validé",
+    }
+)
 
 random.shuffle(rows)
 
-fieldnames = ["date", "montant", "fournisseur", "categorie", "description", "employe", "centre_cout", "statut"]
+fieldnames = [
+    "date",
+    "montant",
+    "fournisseur",
+    "categorie",
+    "description",
+    "employe",
+    "centre_cout",
+    "statut",
+]
 with open("demo_data/expenses.csv", "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(f, fieldnames=fieldnames)
     writer.writeheader()
