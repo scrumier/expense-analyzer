@@ -1,160 +1,277 @@
-import pandas as pd
+"""Find the expense lines worth a human look.
+
+Two layers, deliberately kept apart.
+
+Fixed rules catch what is already known to be wrong: an amount over a
+threshold, the same charge twice. They are auditable, and an accountant can
+argue with the threshold.
+
+Isolation Forest is an unsupervised model: it learns what normal looks like in
+this particular dataset and isolates the points that take the fewest questions
+to separate from the rest. It catches the combinations nobody wrote a rule for,
+at the cost of not being able to state a threshold up front.
+"""
+
 import numpy as np
+import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
+DEFAULT_ABSOLUTE_THRESHOLD = 20_000.0
+DEFAULT_DUPLICATE_WINDOW_DAYS = 5
+DEFAULT_CONTAMINATION = 0.08
 
-# ── Détection par règles ─────────────────────────────────────────────────────
+# Isolation Forest needs a population to compare against. Under this many rows
+# "unusual" is meaningless, so only the fixed rules run.
+MIN_ROWS_FOR_MODEL = 10
 
-def _detect_rules(df: pd.DataFrame, absolute_threshold: float, duplicate_window_days: int) -> list[dict]:
-    anomalies = []
+# Fixed so two runs on the same export produce the same anomalies.
+RANDOM_SEED = 42
+N_ESTIMATORS = 100
 
-    # Seuil absolu configurable
-    for _, row in df[df["montant"] >= absolute_threshold].iterrows():
-        anomalies.append({
+# Thresholds used to phrase why a line was flagged, not to flag it.
+RATIO_CATEGORY_HIGH = 3
+SUPPLIER_RARE_MAX = 2
+ROUND_AMOUNT_UNIT = 1000
+
+# Saturday, in pandas' Monday=0 week numbering.
+WEEKEND_START = 5
+
+ANOMALY_FIELDS = ("fournisseur", "categorie", "description", "employe", "centre_cout")
+
+
+def _row_identity(row: pd.Series) -> dict[str, object]:
+    """Copy the descriptive columns of a row into an anomaly record.
+
+    Args:
+        row: One expense line.
+
+    Returns:
+        The date, amount and descriptive fields, with "" for anything absent.
+    """
+    return {
+        "date": str(row["date"].date()),
+        "montant": row["montant"],
+        **{field: row.get(field, "") for field in ANOMALY_FIELDS},
+    }
+
+
+def _detect_rules(
+    df: pd.DataFrame,
+    absolute_threshold: float,
+    duplicate_window_days: int,
+) -> list[dict]:
+    """Flag the lines that break an explicit rule.
+
+    Args:
+        df: The expenses.
+        absolute_threshold: Amount at or above which a line is always flagged.
+        duplicate_window_days: How far apart two identical charges can be and
+            still count as a duplicate.
+
+    Returns:
+        One record per flagged line, with `score` left None: a rule either
+        fires or it does not, there is no confidence to report.
+    """
+    anomalies = [
+        {
+            **_row_identity(row),
             "type": "montant_eleve",
-            "date": str(row["date"].date()),
-            "montant": row["montant"],
-            "fournisseur": row["fournisseur"],
-            "categorie": row["categorie"],
-            "description": row.get("description", ""),
-            "employe": row.get("employe", ""),
-            "centre_cout": row.get("centre_cout", ""),
             "detail": f"Montant >= seuil {absolute_threshold:,.0f} EUR",
             "score": None,
-        })
+        }
+        for _, row in df[df["montant"] >= absolute_threshold].iterrows()
+    ]
 
-    # Doublons (même fournisseur + même montant dans la fenêtre)
-    df_sorted = df.sort_values("date").reset_index(drop=True)
-    seen = set()
-    for i, row in df_sorted.iterrows():
+    ordered = df.sort_values("date").reset_index(drop=True)
+    already_reported: set[tuple] = set()
+    for position, row in ordered.iterrows():
         key = (row["fournisseur"], row["montant"])
-        if key in seen:
+        if key in already_reported:
             continue
-        same = df_sorted[
-            (df_sorted["fournisseur"] == row["fournisseur"]) &
-            (df_sorted["montant"] == row["montant"]) &
-            (abs((df_sorted["date"] - row["date"]).dt.days) <= duplicate_window_days) &
-            (df_sorted.index != i)
+        twins = ordered[
+            (ordered["fournisseur"] == row["fournisseur"])
+            & (ordered["montant"] == row["montant"])
+            & (abs((ordered["date"] - row["date"]).dt.days) <= duplicate_window_days)
+            & (ordered.index != position)
         ]
-        if not same.empty:
-            seen.add(key)
-            anomalies.append({
+        if twins.empty:
+            continue
+        already_reported.add(key)
+        anomalies.append(
+            {
+                **_row_identity(row),
                 "type": "doublon",
-                "date": str(row["date"].date()),
-                "montant": row["montant"],
-                "fournisseur": row["fournisseur"],
-                "categorie": row["categorie"],
-                "description": row.get("description", ""),
-                "employe": row.get("employe", ""),
-                "centre_cout": row.get("centre_cout", ""),
-                "detail": f"Transaction identique le {same.iloc[0]['date'].date()} ({duplicate_window_days}j)",
+                "detail": (
+                    f"Transaction identique le {twins.iloc[0]['date'].date()} "
+                    f"({duplicate_window_days}j)"
+                ),
                 "score": None,
-            })
+            }
+        )
 
     return anomalies
 
 
-# ── Détection par Isolation Forest ──────────────────────────────────────────
-
 def _build_features(df: pd.DataFrame) -> pd.DataFrame:
-    feat = pd.DataFrame(index=df.index)
-    feat["montant_log"] = np.log1p(df["montant"])
-    feat["jour_semaine"] = df["date"].dt.dayofweek
-    feat["mois"] = df["date"].dt.month
-    feat["is_weekend"] = (df["date"].dt.dayofweek >= 5).astype(int)
-    feat["montant_rond_1000"] = (df["montant"] % 1000 == 0).astype(int)
+    """Turn expense lines into the numeric features the model reads.
 
-    # Ratio montant vs moyenne de la catégorie
-    cat_mean = df.groupby("categorie")["montant"].transform("mean")
-    feat["ratio_cat"] = df["montant"] / cat_mean.replace(0, 1)
+    The amount is log-scaled because expenses span several orders of magnitude
+    and the raw value would drown every other feature.
 
-    # Fréquence du fournisseur (fournisseur rare = plus suspect)
-    supplier_freq = df["fournisseur"].map(df["fournisseur"].value_counts())
-    feat["supplier_freq"] = supplier_freq
+    Args:
+        df: The expenses.
 
-    return feat.fillna(0)
+    Returns:
+        One numeric row per expense line.
+    """
+    features = pd.DataFrame(index=df.index)
+    features["montant_log"] = np.log1p(df["montant"])
+    features["jour_semaine"] = df["date"].dt.dayofweek
+    features["mois"] = df["date"].dt.month
+    features["is_weekend"] = (df["date"].dt.dayofweek >= WEEKEND_START).astype(int)
+    features["montant_rond"] = (df["montant"] % ROUND_AMOUNT_UNIT == 0).astype(int)
+
+    category_mean = df.groupby("categorie")["montant"].transform("mean")
+    features["ratio_cat"] = df["montant"] / category_mean.replace(0, 1)
+    features["supplier_freq"] = df["fournisseur"].map(df["fournisseur"].value_counts())
+
+    return features.fillna(0)
 
 
-def _explain_anomaly(row: pd.Series, feat_row: pd.Series, df: pd.DataFrame) -> str:
+def _explain(row: pd.Series, feature_row: pd.Series, df: pd.DataFrame) -> str:
+    """Put into words why the model isolated this line.
+
+    The model gives a score, not a reason. These are the features that were
+    extreme for this row, read back in plain language.
+
+    Args:
+        row: The flagged expense line.
+        feature_row: Its computed features.
+        df: The full dataset, used to quote the category average.
+
+    Returns:
+        A sentence listing what stands out, joined by "+".
+    """
     reasons = []
-    cat_mean = df[df["categorie"] == row["categorie"]]["montant"].mean()
-    if feat_row["ratio_cat"] > 3:
-        reasons.append(f"montant {feat_row['ratio_cat']:.1f}x la moyenne de la categorie ({cat_mean:.0f} EUR)")
-    if feat_row["is_weekend"]:
+    if feature_row["ratio_cat"] > RATIO_CATEGORY_HIGH:
+        category_mean = df[df["categorie"] == row["categorie"]]["montant"].mean()
+        reasons.append(
+            f"montant {feature_row['ratio_cat']:.1f}x la moyenne de la "
+            f"catégorie ({category_mean:.0f} EUR)"
+        )
+    if feature_row["is_weekend"]:
         reasons.append("transaction le weekend")
-    if feat_row["montant_rond_1000"]:
-        reasons.append("montant rond multiple de 1000")
-    if feat_row["supplier_freq"] <= 2:
-        reasons.append(f"fournisseur peu frequent ({int(feat_row['supplier_freq'])} occurrence(s))")
-    return " + ".join(reasons) if reasons else "pattern inhabituel detecte par le modele"
+    if feature_row["montant_rond"]:
+        reasons.append(f"montant rond multiple de {ROUND_AMOUNT_UNIT}")
+    if feature_row["supplier_freq"] <= SUPPLIER_RARE_MAX:
+        occurrences = int(feature_row["supplier_freq"])
+        reasons.append(f"fournisseur peu fréquent ({occurrences} occurrence(s))")
+    if not reasons:
+        return "pattern inhabituel détecté par le modèle"
+    return " + ".join(reasons)
 
 
 def _detect_isolation_forest(df: pd.DataFrame, contamination: float) -> list[dict]:
-    if len(df) < 10:
+    """Flag the lines the model considers atypical for this dataset.
+
+    Args:
+        df: The expenses.
+        contamination: Share of the dataset the model should treat as
+            anomalous. It is a budget, not a discovered truth.
+
+    Returns:
+        One record per flagged line, most anomalous first, each with a score
+        from 0 to 1 where 1 is the most atypical line in this dataset.
+    """
+    if len(df) < MIN_ROWS_FOR_MODEL:
         return []
 
-    feat = _build_features(df)
-    X = StandardScaler().fit_transform(feat)
+    features = _build_features(df)
+    scaled = StandardScaler().fit_transform(features)
 
-    model = IsolationForest(contamination=contamination, random_state=42, n_estimators=100)
-    labels = model.fit_predict(X)
-    raw_scores = model.score_samples(X)
+    model = IsolationForest(
+        contamination=contamination,
+        random_state=RANDOM_SEED,
+        n_estimators=N_ESTIMATORS,
+    )
+    labels = model.fit_predict(scaled)
+    raw_scores = model.score_samples(scaled)
 
-    # Normalise le score anomalie entre 0 et 1 (1 = plus anormal)
-    min_s, max_s = raw_scores.min(), raw_scores.max()
-    norm_scores = 1 - (raw_scores - min_s) / (max_s - min_s + 1e-9)
+    # score_samples is more negative the more anomalous. Flip and rescale to
+    # 0-1 so the report can show a number that reads the intuitive way.
+    lowest, highest = raw_scores.min(), raw_scores.max()
+    normalised = 1 - (raw_scores - lowest) / (highest - lowest + 1e-9)
 
-    anomalies = []
-    for idx in np.where(labels == -1)[0]:
-        row = df.iloc[idx]
-        feat_row = feat.iloc[idx]
-        score = round(float(norm_scores[idx]), 3)
-        anomalies.append({
+    anomalies = [
+        {
+            **_row_identity(df.iloc[index]),
             "type": "pattern_ml",
-            "date": str(row["date"].date()),
-            "montant": row["montant"],
-            "fournisseur": row["fournisseur"],
-            "categorie": row["categorie"],
-            "description": row.get("description", ""),
-            "employe": row.get("employe", ""),
-            "centre_cout": row.get("centre_cout", ""),
-            "detail": _explain_anomaly(row, feat_row, df),
-            "score": score,
-        })
-
-    anomalies.sort(key=lambda x: -x["score"])
+            "detail": _explain(df.iloc[index], features.iloc[index], df),
+            "score": round(float(normalised[index]), 3),
+        }
+        for index in np.where(labels == -1)[0]
+    ]
+    anomalies.sort(key=lambda anomaly: -anomaly["score"])
     return anomalies
 
 
-# ── Interface publique ───────────────────────────────────────────────────────
-
 def detect_anomalies(
     df: pd.DataFrame,
-    absolute_threshold: float = 20_000.0,
-    duplicate_window_days: int = 5,
-    contamination: float = 0.08,
+    absolute_threshold: float = DEFAULT_ABSOLUTE_THRESHOLD,
+    duplicate_window_days: int = DEFAULT_DUPLICATE_WINDOW_DAYS,
+    contamination: float = DEFAULT_CONTAMINATION,
 ) -> list[dict]:
+    """Run both detection layers and merge their findings.
+
+    A line already caught by a rule is not reported twice: the rule explains
+    it better than a model score would.
+
+    Args:
+        df: The expenses.
+        absolute_threshold: Amount at or above which a line is always flagged.
+        duplicate_window_days: Window for treating two identical charges as a
+            duplicate.
+        contamination: Share of the dataset the model treats as anomalous.
+
+    Returns:
+        Rule hits first, then the model's, without duplicates.
+    """
     rules = _detect_rules(df, absolute_threshold, duplicate_window_days)
-    ml = _detect_isolation_forest(df, contamination)
+    model_hits = _detect_isolation_forest(df, contamination)
 
-    # Dédoublonnage: si une transaction est déjà flaggée par les règles, on enrichit plutôt qu'on duplique
-    rule_keys = {(a["date"], a["fournisseur"], a["montant"]) for a in rules}
-    ml_unique = [a for a in ml if (a["date"], a["fournisseur"], a["montant"]) not in rule_keys]
-
-    return rules + ml_unique
+    seen = {(a["date"], a["fournisseur"], a["montant"]) for a in rules}
+    unique = [
+        a for a in model_hits if (a["date"], a["fournisseur"], a["montant"]) not in seen
+    ]
+    return rules + unique
 
 
 def summarize(df: pd.DataFrame) -> dict:
-    s = {
+    """Total the expenses for the report header.
+
+    Args:
+        df: The expenses.
+
+    Returns:
+        Totals overall, by category and by top supplier, plus by employee and
+        cost centre when those columns are present.
+    """
+    summary = {
         "total_lignes": len(df),
         "total_depenses": round(df["montant"].sum(), 2),
         "periode": f"{df['date'].min().date()} - {df['date'].max().date()}",
         "par_categorie": df.groupby("categorie")["montant"].sum().round(2).to_dict(),
-        "top_fournisseurs": df.groupby("fournisseur")["montant"].sum().nlargest(5).round(2).to_dict(),
+        "top_fournisseurs": (
+            df.groupby("fournisseur")["montant"].sum().nlargest(5).round(2).to_dict()
+        ),
     }
     if "employe" in df.columns:
-        s["par_employe"] = df.groupby("employe")["montant"].sum().round(2).to_dict()
+        summary["par_employe"] = (
+            df.groupby("employe")["montant"].sum().round(2).to_dict()
+        )
     if "centre_cout" in df.columns:
-        s["par_centre_cout"] = df.groupby("centre_cout")["montant"].sum().round(2).to_dict()
-    return s
+        summary["par_centre_cout"] = (
+            df.groupby("centre_cout")["montant"].sum().round(2).to_dict()
+        )
+    return summary
