@@ -9,17 +9,20 @@ Output is an HTML report, written in sentences you can forward to the person con
 
 ```bash
 cp .env.example .env    # add your OPENROUTER_API_KEY
-make setup              # deps, then generates the demo report
-make run                # http://127.0.0.1:5051
+make setup
+make run                # http://127.0.0.1:5051, then hit "Générer le rapport"
 ```
 
-Or straight to the report:
+Or straight to the report, without the web view:
 
 ```bash
-uv run python analyze.py demo_data/expenses.csv output/
+make report             # uses the demo CSV
+make report CSV=mes-depenses.csv
 ```
 
-Your CSV needs these columns: `date`, `montant`, `fournisseur`, `categorie`, `description`, `statut`.
+Your CSV needs these columns: `date`, `montant`, `fournisseur`, `categorie`, `description`, `statut`. Rows with an unreadable date or amount are dropped; a missing column is fatal, because a rule that silently stops checking is worse than an error.
+
+`make test` runs the suite, `make lint` runs Ruff.
 
 ## How it works
 
