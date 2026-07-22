@@ -1,6 +1,6 @@
 # expense-analyzer
 
-**Problem:** at month-end you scroll the expense sheet hoping something looks wrong.
+**Problem:** at month-end you scroll the expense sheet hoping something looks wrong.<br>
 **Solution:** the suspicious lines get flagged, each one with the reason why.
 
 Output is an HTML report, written in sentences you can forward to the person concerned.
