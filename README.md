@@ -1,62 +1,46 @@
 # expense-analyzer
 
-Agent d'analyse de dépenses d'entreprise. Détecte automatiquement les anomalies financières et génère un rapport HTML avec explication IA.
+**Problem:** at month-end you scroll the expense sheet hoping something looks wrong.
+**Solution:** the suspicious lines get flagged, each one with the reason why.
 
-## Ce que ça fait
+Output is an HTML report, written in sentences you can forward to the person concerned.
 
-1. Charge un CSV de dépenses (export ERP, notes de frais, etc.)
-2. Détecte les anomalies avec deux approches combinées:
-   - **Règles métier**: seuil absolu configurable, doublons exacts
-   - **Isolation Forest** (machine learning): patterns inhabituels détectés sans règles prédéfinies
-3. Génère un rapport HTML avec narration en langage naturel via Claude
-
-## Utilisation
+## Run it
 
 ```bash
-# Setupx
-uv sync
-cp .env.example .env  # remplir OPENROUTER_API_KEY
+cp .env.example .env    # add your OPENROUTER_API_KEY
+make setup              # deps, then generates the demo report
+make run                # http://127.0.0.1:5051
+```
 
-# Générer les données de démo
-uv run python demo_data/gen_expenses.py
+Or straight to the report:
 
-# Analyser
+```bash
 uv run python analyze.py demo_data/expenses.csv output/
-# → ouvrir output/rapport-depenses-*.html
 ```
 
-## Paramètres
+Your CSV needs these columns: `date`, `montant`, `fournisseur`, `categorie`, `description`, `statut`.
 
-```bash
-uv run python analyze.py expenses.csv output/ \
-  --seuil-absolu 15000 \     # montant au-dessus duquel on flag systématiquement
-  --fenetre-doublon 7 \      # jours pour considérer deux transactions comme doublons
-  --contamination 0.05       # % de transactions à considérer comme anomalies (IF)
-```
+## How it works
 
-## Format CSV attendu
+Two layers, on purpose.
 
-Colonnes requises: `date`, `montant`, `fournisseur`, `categorie`, `description`, `statut`
+**Fixed rules** catch what you already know is wrong: amount over a threshold, exact duplicate within a time window. Auditable, no surprises.
 
-## Architecture
+**Isolation Forest** learns what normal looks like in your own data and catches what no rule anticipated: a rare supplier, on a weekend, for a suspiciously round number. Each hit comes with a confidence score.
 
-```
-analyze.py              → CLI entry point
-expense/
-  loader.py             → lecture et validation CSV
-  analyzer.py           → détection anomalies (règles + Isolation Forest)
-  reporter.py           → rapport HTML + narration Claude via OpenRouter
-demo_data/
-  gen_expenses.py       → génère 203 lignes avec 5 anomalies injectées
-```
+Then Claude writes the narration so the report reads like a note, not a dump.
 
-## Anomalies détectées
+Tune it with `--seuil-absolu`, `--fenetre-doublon` and `--contamination`.
 
-**Règles fixes (auditables):**
-- Montant >= seuil absolu
-- Doublon exact (même fournisseur, même montant, fenêtre configurable)
+## What it won't do
 
-**Isolation Forest (non-supervisé):**
-- Apprend ce qui est "normal" dans vos propres données
-- Détecte les combinaisons inhabituelles: fournisseur rare + weekend + montant rond
-- Score de confiance 0-1 affiché dans le rapport
+It doesn't decide that something is fraud. It says "this one is unusual, and here's why". A human decides.
+
+## This is the level 1
+
+One CSV you export by hand.
+
+What's actually useful is the same thing pulled from your ERP on a schedule, with thresholds tuned on your own history instead of my defaults, and the report landing in the right inbox on the 1st without anyone launching it. That's the part I build.
+
+[LinkedIn](https://www.linkedin.com/in/sonam-crumiere) · [sonam.me](https://sonam.me)
