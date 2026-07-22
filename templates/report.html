@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rapport analyse dépenses, {{ generated_at.strftime('%d/%m/%Y') }}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #f9fafb;
+    color: #1f2937;
+    padding: 32px;
+  }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .meta { font-size: 13px; color: #6b7280; margin-bottom: 32px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .card h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #9ca3af;
+    margin-bottom: 8px;
+  }
+  .card p { font-size: 24px; font-weight: 700; }
+  .card.alert { border-left: 4px solid #dc2626; }
+  .section {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .section h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+  .analysis { font-size: 14px; line-height: 1.7; color: #374151; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left;
+    padding: 10px 12px;
+    background: #f9fafb;
+    border-bottom: 2px solid #e5e7eb;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: #6b7280;
+    white-space: nowrap;
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  tr:hover td { background: #f9fafb; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+    color: white;
+    white-space: nowrap;
+  }
+  .score { font-size: 11px; color: #6b7280; }
+  .sub { font-size: 11px; color: #6b7280; }
+  .sub-dim { font-size: 11px; color: #9ca3af; }
+  .amount { font-family: monospace; font-weight: 600; white-space: nowrap; }
+  .detail { color: #6b7280; font-size: 12px; }
+  .md-table { margin: 8px 0; }
+  .md-table th, .md-table td { border: 1px solid #e5e7eb; padding: 6px 10px; }
+  .breakdowns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .breakdowns .section { margin-bottom: 0; }
+</style>
+</head>
+<body>
+
+<h1>Rapport analyse dépenses</h1>
+<p class="meta">
+  Généré le {{ generated_at.strftime('%d/%m/%Y à %H:%M') }},
+  période : {{ summary.periode }}
+</p>
+
+<div class="grid">
+  <div class="card">
+    <h3>Total dépenses</h3>
+    <p>{{ "{:,.0f}".format(summary.total_depenses) }} EUR</p>
+  </div>
+  <div class="card">
+    <h3>Nombre de lignes</h3>
+    <p>{{ summary.total_lignes }}</p>
+  </div>
+  <div class="card alert">
+    <h3>Anomalies détectées</h3>
+    <p>{{ anomalies | length }}</p>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Analyse</h2>
+  <div class="analysis">{{ narrative }}</div>
+</div>
+
+<div class="section">
+  <h2>Anomalies ({{ anomalies | length }})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Fournisseur</th>
+          <th>Catégorie</th>
+          <th>Employé / CC</th>
+          <th>Montant</th>
+          <th>Détail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in anomalies %}
+        <tr>
+          <td>{{ a.date }}</td>
+          <td>
+            <span class="badge" style="background:{{ a.badge_color }}">
+              {{ a.badge_label }}
+            </span>
+            {% if a.score %}<span class="score">{{ "%.2f"|format(a.score) }}</span>{% endif %}
+          </td>
+          <td>{{ a.fournisseur }}</td>
+          <td>{{ a.categorie }}</td>
+          <td>
+            <span class="sub">{{ a.employe }}</span><br>
+            <span class="sub-dim">{{ a.centre_cout }}</span>
+          </td>
+          <td class="amount">{{ "{:,.2f}".format(a.montant) }} EUR</td>
+          <td class="detail">{{ a.detail }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="detail">Aucune anomalie sur la période.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="breakdowns">
+  {% for title, label, rows in [
+      ('Par catégorie', 'Catégorie', par_categorie),
+      ('Par employé', 'Employé', par_employe),
+      ('Par centre de coût', 'Centre', par_centre_cout)
+  ] %}
+  {% if rows %}
+  <div class="section">
+    <h2>{{ title }}</h2>
+    <table>
+      <thead><tr><th>{{ label }}</th><th>Total</th></tr></thead>
+      <tbody>
+        {% for name, amount in rows %}
+        <tr>
+          <td>{{ name }}</td>
+          <td class="amount">{{ "{:,.2f}".format(amount) }} EUR</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+
+</body>
+</html>

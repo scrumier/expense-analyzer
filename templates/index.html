@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense analyzer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #f9fafb;
+    color: #1f2937;
+    padding: 40px;
+    max-width: 640px;
+  }
+  h1 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+  p { font-size: 14px; color: #6b7280; line-height: 1.6; margin-bottom: 20px; }
+  button {
+    padding: 10px 20px;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  button:hover { background: #1d4ed8; }
+</style>
+</head>
+<body>
+<h1>Aucun rapport pour l'instant</h1>
+<p>
+  Lancer l'analyse sur le jeu de démonstration (203 lignes de dépenses, dont
+  quelques anomalies volontairement injectées). Le rapport prend une dizaine de
+  secondes : la détection est immédiate, c'est la rédaction du commentaire qui
+  attend le modèle.
+</p>
+<form method="post" action="/generate">
+  <button type="submit">Générer le rapport</button>
+</form>
+</body>
+</html>
