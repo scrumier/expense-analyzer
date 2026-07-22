@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .env
 output/
-uv.lock
 *.egg-info/
+.pytest_cache/
+.ruff_cache/
 local.mk
